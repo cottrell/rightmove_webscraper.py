@@ -6,6 +6,21 @@ import requests
 import pandas as pd
 import datetime as dt
 
+class _DetailsFromRightmoveObject():
+    """
+    Recurse into the df.url. Use a class to stay in the same style.
+    """
+    def __init__(self, rightmove_data):
+        self.rightmove_data = rightmove_data # whatever
+        self._response_cache = dict()
+    def get_result(self, url):
+        if url not in self._response_cache or self._response_cache[url][1] != 200:
+            r = requests.get(url)
+            self._response_cache[url] = r.content, r.status_code # like before
+        return self._response_cache[url]
+    def get_page(self, request_content):
+        pass
+
 class _GetDataFromURL(object):
     """This "private" class does all the heavy lifting of fetching the data
     from the url provided, and then returns the relevant data to the
@@ -68,7 +83,10 @@ class _GetDataFromURL(object):
     def get_page(self, request_content):
         """Method to scrape the data from a single page of search results.
         Used iteratively by the .get_results() method to scrape data from
-        every page returned by the search."""
+        every page returned by the search.
+
+        TODO get STC
+        """
 
         # Process the html:
         tree = html.fromstring(request_content)
@@ -89,20 +107,24 @@ class _GetDataFromURL(object):
         xp_agent_urls = """//div[@class="propertyCard-contactsItem"]\
         //div[@class="propertyCard-branchLogo"]\
         //a[@class="propertyCard-branchLogo-link"]/@href"""
+        xp_stc = '//span[@class="propertyCard-tagTitle propertyCard-tagTitle--display-status"]/text()'
 
         # Create data lists from xpaths:
         price_pcm = tree.xpath(xp_prices)
         titles = tree.xpath(xp_titles)
         addresses = tree.xpath(xp_addresses)
+        stc = tree.xpath(xp_stc)
         base = "http://www.rightmove.co.uk"
         weblinks = ["{}{}".format(base, tree.xpath(xp_weblinks)[w]) for w in range(len(tree.xpath(xp_weblinks)))]
         agent_urls = ["{}{}".format(base, tree.xpath(xp_agent_urls)[a]) for a in range(len(tree.xpath(xp_agent_urls)))]
 
+        # Should we check lists are all same length? Otherwise appending cols does not make sense, they will note be aligned?
+
         # Store the data in a Pandas DataFrame:
-        data = [price_pcm, titles, addresses, weblinks, agent_urls]
+        data = [price_pcm, titles, addresses, weblinks, agent_urls, stc]
         temp_df = pd.DataFrame(data)
         temp_df = temp_df.transpose()
-        temp_df.columns = ["price", "type", "address", "url", "agent_url"]
+        temp_df.columns = ["price", "type", "address", "url", "agent_url", "stc"]
 
         # Drop empty rows which come from placeholders in the html:
         temp_df = temp_df[temp_df["address"].notnull()]
@@ -118,6 +140,7 @@ class _GetDataFromURL(object):
 
         # Iterate through the rest of the pages scraping results:
         for p in range(1, self.page_count + 1, 1):
+            print('getting page {} of {}'.format(p, self.page_count))
 
             # Create the URL of the specific results page:
             p_url = "{}&index={}".format(str(self.url), str((p * 24)))
