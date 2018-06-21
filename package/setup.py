@@ -1,6 +1,7 @@
 try:
     from setuptools import setup
 except Exception as e:
+    print('got some exception importing setuptools. generally this is bad', e)
     from distutils.core import setup
 
 long_description = """A simple class for scraping data from the UK's most prominent property sales & lettings listings website, www.rightmove.co.uk
