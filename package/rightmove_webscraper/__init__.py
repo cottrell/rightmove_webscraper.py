@@ -32,14 +32,17 @@ class _DetailsFromRightmoveObject():
     """
     def __init__(self, rightmove_data):
         self.rightmove_data = rightmove_data # whatever
-        self._response_cache = dict()
-    def get_result(self, url):
-        if url not in self._response_cache or self._response_cache[url][1] != 200:
-            r = requests.get(url)
-            self._response_cache[url] = r.content, r.status_code # like before
-        return self._response_cache[url]
+    @staticmethod
+    def make_request(self, url):
+        r = requests.get(url)
+        return r.content, r.status_code
     def get_page(self, request_content):
-        pass
+        tree = html.fromstring(request_content)
+        lower = request_content.lower()
+        # re.match(b'leasehold', l)
+        is_leasehold = b'leasehold' in lower
+        is_freehold = b'freehold' in lower
+        return tree
 
 class _GetDataFromURL(object):
     """This "private" class does all the heavy lifting of fetching the data
