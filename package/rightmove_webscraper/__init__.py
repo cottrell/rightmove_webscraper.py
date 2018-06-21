@@ -6,6 +6,26 @@ import requests
 import pandas as pd
 import datetime as dt
 
+# PROBABLY A BETTER WAY TO JUST RUN THROUGH A WEB CACHE or use https://github.com/ionrock/cachecontrol
+_cache_requests_for_dev = False
+try:
+    # to avoid losing cache on imp.reload ...
+    _cache
+except NameError as e:
+    _cache = dict()
+
+class _cached_requests():
+    def get(self, url):
+        if url in _cache:
+            return _cache[url]
+        res = _requests.get(url)
+        _cache[url] = res
+        return res
+if _cache_requests_for_dev:
+    import requests as _requests
+    requests = _cached_requests()
+########################################################
+
 class _DetailsFromRightmoveObject():
     """
     Recurse into the df.url. Use a class to stay in the same style.
@@ -107,24 +127,51 @@ class _GetDataFromURL(object):
         xp_agent_urls = """//div[@class="propertyCard-contactsItem"]\
         //div[@class="propertyCard-branchLogo"]\
         //a[@class="propertyCard-branchLogo-link"]/@href"""
-        xp_stc = '//span[@class="propertyCard-tagTitle propertyCard-tagTitle--display-status"]/text()'
+
+        # THIS DOES NOT WORK, STC IS NOT IN EVERY ENTRY AND xpath is only handling those casees
+        # xp_stc = '//span[@class="propertyCard-tagTitle propertyCard-tagTitle--display-status"]/text()'
+
+        xp_added_or_reduced_on = """//span[@class="propertyCard-branchSummary-addedOrReduced"]/text()"""
+        xp_added_by = """//span[@class="propertyCard-branchSummary-branchName"]/text()"""
 
         # Create data lists from xpaths:
         price_pcm = tree.xpath(xp_prices)
         titles = tree.xpath(xp_titles)
         addresses = tree.xpath(xp_addresses)
-        stc = tree.xpath(xp_stc)
+        # stc = tree.xpath(xp_stc)
+        added_or_reduced_on = tree.xpath(xp_added_or_reduced_on)
+        def split_and_fix(x):
+            x = x.split(' ')
+            add_red, date = x[0], x[-1]
+            if date == 'today':
+                date = dt.date.today()
+            elif date == 'yesterday':
+                date = dt.date.today() - dt.timedelta(days=1)
+            else:
+                date = dt.datetime.strptime(date, '%d/%m/%Y').date() # hopefully not local dependent
+            return add_red, date
+        if added_or_reduced_on:
+            add_red, add_red_on = zip(*map(split_and_fix, added_or_reduced_on))
+        else:
+            add_red = []
+            add_red_on = []
+        added_by = [x.replace(' by ', '') for x in tree.xpath(xp_added_by)]
+
         base = "http://www.rightmove.co.uk"
         weblinks = ["{}{}".format(base, tree.xpath(xp_weblinks)[w]) for w in range(len(tree.xpath(xp_weblinks)))]
         agent_urls = ["{}{}".format(base, tree.xpath(xp_agent_urls)[a]) for a in range(len(tree.xpath(xp_agent_urls)))]
 
+        # super dodgy, relying on addresses being present only in the non-placeholders. see dropna below
+        # assert len(price_pcm) == len(titles) == len(addresses) == len(weblinks) == len(agent_urls), 'bad lengths! xpath only handles fields common across all entries?'
+
         # Should we check lists are all same length? Otherwise appending cols does not make sense, they will note be aligned?
 
         # Store the data in a Pandas DataFrame:
-        data = [price_pcm, titles, addresses, weblinks, agent_urls, stc]
+        data = [price_pcm, titles, addresses, weblinks, agent_urls, add_red, add_red_on, added_by]
+        data = [map(lambda x: x.strip() if type(x) is str else x, y) for y in data]
         temp_df = pd.DataFrame(data)
         temp_df = temp_df.transpose()
-        temp_df.columns = ["price", "type", "address", "url", "agent_url", "stc"]
+        temp_df.columns = ["price", "type", "address", "url", "agent_url", "add_red", "add_red_on", "added_by"]
 
         # Drop empty rows which come from placeholders in the html:
         temp_df = temp_df[temp_df["address"].notnull()]
@@ -137,6 +184,7 @@ class _GetDataFromURL(object):
 
         # Create DataFrame of the first page (which has already been requested):
         results = self.get_page(self.first_page[0])
+        results['page'] = 1 # rm start count at 1
 
         # Iterate through the rest of the pages scraping results:
         for p in range(1, self.page_count + 1, 1):
@@ -153,6 +201,7 @@ class _GetDataFromURL(object):
 
             # Create a temporary dataframe of page results:
             temp_df = self.get_page(rc[0])
+            temp_df['page'] = p + 1
 
             # Concatenate the temporary dataframe with the full dataframe:
             frames = [results, temp_df]
